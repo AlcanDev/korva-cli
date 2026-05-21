@@ -137,20 +137,20 @@ jobs:
     if: ${{ needs.release.outputs.skipped == 'false' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check tap token
+      - name: Check tap deploy key
         id: gate
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
-          if [ -n "$TAP_TOKEN" ]; then
-            echo "have_token=true" >> "$GITHUB_OUTPUT"
+          if [ -n "$DEPLOY_KEY" ]; then
+            echo "have_key=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::HOMEBREW_TAP_TOKEN secret is not set — skipping the Homebrew formula bump. Create a PAT with 'contents: write' on AlcanDev/homebrew-tap and add it as a repo secret to enable this step."
-            echo "have_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::HOMEBREW_TAP_DEPLOY_KEY secret is not set — skipping the Homebrew formula bump. Generate an ED25519 SSH key, register the public half as a deploy key (write) on AlcanDev/homebrew-tap, then add the private half as a repo secret to enable this step."
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download release artifacts
-        if: steps.gate.outputs.have_token == 'true'
+        if: steps.gate.outputs.have_key == 'true'
         id: shas
         env:
           GH_TOKEN: ${{ github.token }}
@@ -166,10 +166,25 @@ jobs:
             echo "${key}=${sha}" >> "$GITHUB_OUTPUT"
           done
 
-      - name: Clone homebrew-tap, write formula, push
-        if: steps.gate.outputs.have_token == 'true'
+      - name: Configure SSH for tap
+        if: steps.gate.outputs.have_key == 'true'
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          # Write the deploy key (already includes a trailing newline) and pin
+          # github.com's host key so we never accept an MITM substitute.
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/tap_deploy_key
+          chmod 600 ~/.ssh/tap_deploy_key
+          ssh-keyscan -t rsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Clone homebrew-tap, write formula, push
+        if: steps.gate.outputs.have_key == 'true'
+        env:
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/tap_deploy_key -o IdentitiesOnly=yes
           TAG: ${{ needs.release.outputs.tag }}
           SHA_DA:  ${{ steps.shas.outputs.korva_darwin_amd64 }}
           SHA_DAR: ${{ steps.shas.outputs.korva_darwin_arm64 }}
@@ -179,7 +194,7 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
 
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/AlcanDev/homebrew-tap.git" /tmp/tap
+          git clone git@github.com:AlcanDev/homebrew-tap.git /tmp/tap
           cd /tmp/tap
           git config user.name  "korva-release-bot"
           git config user.email "release-bot@users.noreply.github.com"
