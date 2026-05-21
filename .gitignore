@@ -1,0 +1,15 @@
+# Go build artifacts
+bin/
+dist/
+installer/dist/
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local config
+*.local

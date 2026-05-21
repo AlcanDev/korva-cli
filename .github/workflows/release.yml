@@ -1,0 +1,233 @@
+name: Release
+
+# Publishes a GitHub Release with cross-platform binaries + macOS .pkg
+# whenever the CI workflow passes on main. Also bumps Formula/korva.rb in
+# AlcanDev/homebrew-tap so `brew install alcandev/tap/korva` always
+# resolves to the latest release.
+#
+# Trigger model:
+#   - workflow_run on a successful CI completion guarantees we never
+#     publish broken builds.
+#   - workflow_dispatch with an optional `version` input lets us re-release
+#     a specific commit or skip the auto-bump for a manual minor/major.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version tag (e.g. v0.2.0). Leave blank to auto-bump patch."
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build + publish
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # macOS for lipo + pkgbuild; build.sh cross-compiles linux + windows
+    # from the same job (CGO_ENABLED=0).
+    runs-on: macos-14
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      skipped: ${{ steps.ver.outputs.skip }}
+    steps:
+      - name: Checkout (commit that CI vetted)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.sum
+
+      - name: Compute next version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          override="${{ inputs.version }}"
+          if [ -n "$override" ]; then
+            echo "tag=$override"  >> "$GITHUB_OUTPUT"
+            echo "skip=false"     >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git describe --exact-match --tags HEAD >/dev/null 2>&1; then
+            echo "HEAD already tagged; skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          last=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          IFS=. read -r maj min pat <<<"${last#v}"
+          next="v${maj:-0}.${min:-0}.$(( ${pat:-0} + 1 ))"
+          echo "last=$last next=$next"
+          echo "tag=$next"  >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Build cross-platform binaries + macOS .pkg
+        if: steps.ver.outputs.skip == 'false'
+        env:
+          KORVA_VERSION: ${{ steps.ver.outputs.tag }}
+        run: ./installer/build.sh
+
+      - name: Generate SHA-256 checksums
+        if: steps.ver.outputs.skip == 'false'
+        run: |
+          cd installer/dist
+          shasum -a 256 * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Smoke-test the universal macOS binary
+        if: steps.ver.outputs.skip == 'false'
+        run: |
+          chmod +x installer/dist/korva-darwin-universal
+          ./installer/dist/korva-darwin-universal version
+
+      - name: Tag the release commit
+        if: steps.ver.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
+            echo "tag $TAG already exists on origin; reusing."
+            exit 0
+          fi
+          git config user.name  "korva-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git tag -a "$TAG" -m "release $TAG"
+          git push origin "$TAG"
+
+      - name: Publish GitHub Release
+        if: steps.ver.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: korva ${{ steps.ver.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            installer/dist/korva-darwin-amd64
+            installer/dist/korva-darwin-arm64
+            installer/dist/korva-darwin-universal
+            installer/dist/korva-linux-amd64
+            installer/dist/korva-linux-arm64
+            installer/dist/korva-windows-amd64.exe
+            installer/dist/korva-windows-arm64.exe
+            installer/dist/korva-*-macos.pkg
+            installer/dist/SHA256SUMS
+          fail_on_unmatched_files: false
+          draft: false
+          prerelease: false
+
+  homebrew-bump:
+    name: Bump Homebrew formula
+    needs: release
+    if: ${{ needs.release.outputs.skipped == 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tap token
+        id: gate
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -n "$TAP_TOKEN" ]; then
+            echo "have_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::HOMEBREW_TAP_TOKEN secret is not set — skipping the Homebrew formula bump. Create a PAT with 'contents: write' on AlcanDev/homebrew-tap and add it as a repo secret to enable this step."
+            echo "have_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release artifacts
+        if: steps.gate.outputs.have_token == 'true'
+        id: shas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release
+          for f in korva-darwin-amd64 korva-darwin-arm64 korva-linux-amd64 korva-linux-arm64; do
+            gh release download "$TAG" -p "$f" -D /tmp/release -R AlcanDev/korva-cli
+            sha=$(shasum -a 256 "/tmp/release/$f" | awk '{print $1}')
+            # Use uppercase identifier-safe keys for GITHUB_OUTPUT.
+            key=$(echo "$f" | tr '-' '_')
+            echo "${key}=${sha}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Clone homebrew-tap, write formula, push
+        if: steps.gate.outputs.have_token == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+          SHA_DA:  ${{ steps.shas.outputs.korva_darwin_amd64 }}
+          SHA_DAR: ${{ steps.shas.outputs.korva_darwin_arm64 }}
+          SHA_LA:  ${{ steps.shas.outputs.korva_linux_amd64 }}
+          SHA_LAR: ${{ steps.shas.outputs.korva_linux_arm64 }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/AlcanDev/homebrew-tap.git" /tmp/tap
+          cd /tmp/tap
+          git config user.name  "korva-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          mkdir -p Formula
+
+          cat > Formula/korva.rb <<EOF
+          # Auto-generated by AlcanDev/korva-cli release workflow. Do not edit.
+          class Korva < Formula
+            desc "Korva CLI — connects AI coding assistants to the Korva backbone over MCP"
+            homepage "https://github.com/AlcanDev/korva-cli"
+            version "${version}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.intel?
+                url "https://github.com/AlcanDev/korva-cli/releases/download/${TAG}/korva-darwin-amd64"
+                sha256 "${SHA_DA}"
+              else
+                url "https://github.com/AlcanDev/korva-cli/releases/download/${TAG}/korva-darwin-arm64"
+                sha256 "${SHA_DAR}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.intel?
+                url "https://github.com/AlcanDev/korva-cli/releases/download/${TAG}/korva-linux-amd64"
+                sha256 "${SHA_LA}"
+              else
+                url "https://github.com/AlcanDev/korva-cli/releases/download/${TAG}/korva-linux-arm64"
+                sha256 "${SHA_LAR}"
+              end
+            end
+
+            def install
+              # Releases ship raw binaries (not archives); rename to "korva".
+              bin.install Dir["korva-*"].first => "korva"
+            end
+
+            test do
+              assert_match "korva", shell_output("#{bin}/korva version")
+            end
+          end
+          EOF
+
+          git add Formula/korva.rb
+          if git diff --cached --quiet; then
+            echo "no changes to the formula; nothing to commit."
+            exit 0
+          fi
+          git commit -m "korva ${TAG}"
+          git push origin HEAD:main
