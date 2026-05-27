@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -178,6 +179,7 @@ func cmdSetup(args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	targetFlag := fs.String("target", "", "comma-separated targets, or \"all\" (default: auto-detect)")
 	pathFlag := fs.String("path", "", "override path to the target's MCP config file (requires a single --target)")
+	noInteractive := fs.Bool("no-interactive", false, "never prompt for missing IDE paths (CI mode)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -212,13 +214,27 @@ func cmdSetup(args []string) int {
 		return 0
 	}
 
+	interactive := !*noInteractive && isTerminal(os.Stdin)
+
 	failures := 0
 	configured := 0
+	deferred := []editor.Target{} // targets we want to prompt for, after the auto-detected pass
 	for _, t := range targets {
 		path, err := t.ConfigPath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %-16s %v\n", t.Name, err)
 			failures++
+			continue
+		}
+		// When the user typed --target=all (or a specific name) we
+		// honor that and write the config file even if the editor's
+		// directory doesn't exist on this machine. When we're in
+		// auto-detect mode, undetected targets get an interactive
+		// prompt rather than a silent skip — that closes the "I have
+		// Cursor installed in a weird place" gap.
+		autoDetected := *targetFlag == ""
+		if autoDetected && !t.Detected() {
+			deferred = append(deferred, t)
 			continue
 		}
 		if err := t.Configure(cfg.ServerURL, cfg.Token); err != nil {
@@ -230,6 +246,17 @@ func cmdSetup(args []string) int {
 		fmt.Printf("✓ %-16s %s\n", t.Name, path)
 	}
 
+	if interactive && len(deferred) > 0 {
+		extra, fails := promptForMissingTargets(deferred, cfg.ServerURL, cfg.Token)
+		configured += extra
+		failures += fails
+	} else if len(deferred) > 0 {
+		fmt.Fprintln(os.Stderr, "\nUndetected (no TTY for prompt — pass --target <name> --path /path/to/mcp.json to wire):")
+		for _, t := range deferred {
+			fmt.Fprintf(os.Stderr, "  · %-16s %s\n", t.Name, t.DisplayName)
+		}
+	}
+
 	if configured == 0 {
 		fmt.Fprintln(os.Stderr, "\nno targets were configured — pass --target <name> to force one")
 		return 1
@@ -239,6 +266,52 @@ func cmdSetup(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// promptForMissingTargets asks the user, one editor at a time, whether
+// they have it installed in a non-standard location and, if so, where
+// the MCP config file lives. Empty input = skip. Returns the count of
+// successfully-configured editors and the failure count.
+func promptForMissingTargets(missing []editor.Target, serverURL, token string) (configured, failures int) {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println()
+	fmt.Println("Some editors weren't detected at their standard locations.")
+	fmt.Println("If you have any of them installed elsewhere, paste the path to its MCP config file.")
+	fmt.Println("Press Enter to skip an editor.")
+	fmt.Println()
+
+	for _, t := range missing {
+		fmt.Printf("  %s — path to mcp.json (Enter to skip): ", t.DisplayName)
+		line, err := reader.ReadString('\n')
+		if err != nil && line == "" {
+			// EOF or read error: stop prompting, treat rest as skipped.
+			return configured, failures
+		}
+		path := strings.TrimSpace(line)
+		if path == "" {
+			continue
+		}
+		if err := writeServerAtPath(path, t, serverURL, token); err != nil {
+			fmt.Fprintf(os.Stderr, "    ✗ %v\n", err)
+			failures++
+			continue
+		}
+		fmt.Printf("    ✓ configured (%s)\n", path)
+		configured++
+	}
+	return configured, failures
+}
+
+// isTerminal reports whether f is connected to a terminal. We avoid
+// pulling in golang.org/x/term for a one-call dependency; the file mode
+// check distinguishes interactive shells from pipes / redirected input
+// well enough for this UX path.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
 // resolveTargets parses the --target flag. An empty value means "auto-detect
