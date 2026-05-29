@@ -67,10 +67,17 @@ type DevicePoll struct {
 	User   User   `json:"user"`
 }
 
-// StartDeviceLogin opens a device-flow grant.
-func (c *Client) StartDeviceLogin(ctx context.Context) (DeviceStart, error) {
+// StartDeviceLogin opens a device-flow grant. label is a human-meaningful
+// name for this install (the machine hostname); the backbone uses it as the
+// minted token's name so the web console can show which machine connected.
+// An empty label is fine — the server falls back to a generic name.
+func (c *Client) StartDeviceLogin(ctx context.Context, label string) (DeviceStart, error) {
 	var out DeviceStart
-	err := c.do(ctx, http.MethodPost, "/v1/auth/device/start", nil, false, &out)
+	var body any
+	if label != "" {
+		body = map[string]string{"label": label}
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/auth/device/start", body, false, &out)
 	return out, err
 }
 

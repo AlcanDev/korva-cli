@@ -80,7 +80,10 @@ func cmdLogin(args []string) int {
 	client := api.New(serverURL, "")
 	ctx := context.Background()
 
-	start, err := client.StartDeviceLogin(ctx)
+	// Label the token after this machine so the web console can show which
+	// install connected. Best-effort: an empty hostname is fine.
+	label, _ := os.Hostname()
+	start, err := client.StartDeviceLogin(ctx, label)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "could not start login: %v\n", err)
 		return 1
