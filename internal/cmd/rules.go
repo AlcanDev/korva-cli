@@ -27,7 +27,7 @@ Use the Korva MCP without being asked:
 - At the start of a non-trivial task (or when entering plan/agent mode), call ` + "`vault_context`" + ` to load recent team knowledge before planning.
 - Before risky writes (DB migrations, infra, deploys, deleting data), call ` + "`team_pipeline_state`" + ` and warn if the team is in freeze/incident.
 - Before solving a problem or making a design choice, call ` + "`vault_search`" + ` for prior decisions and fixes.
-- After a non-trivial decision, fix, or gotcha, call ` + "`vault_save`" + ` (what, why, alternatives). Never save secrets or raw source.
+- After a non-trivial decision, fix, or gotcha, call ` + "`vault_save`" + ` (what, why, alternatives). Never save secrets or raw source. This includes requests to "save to memory" / remember something for the team: record it in the Korva vault in parallel with any editor-local memory (local memory is per-machine; the Korva vault is shared with the team).
 - Prefer team ` + "`skill_*`" + ` tools over improvising prompts.
 ` + rulesEndMarker
 }
