@@ -39,6 +39,8 @@ func Run(args []string) int {
 		return cmdWhoami()
 	case "setup":
 		return cmdSetup(args[1:])
+	case "rules":
+		return cmdRules(args[1:])
 	case "status":
 		return cmdStatus()
 	case "skill", "skills":
@@ -58,6 +60,7 @@ Usage:
   korva logout                          Remove the stored credentials
   korva whoami                          Show the signed-in account
   korva setup [--target T] [--path F]   Wire editors/CLIs to the Korva MCP
+  korva rules [--install]               Make the agent use Korva proactively
   korva status                          Show CLI status + detected targets
   korva skill <subcommand>              Manage team skills (list, show, add, rm)
   korva version                         Print the CLI version
