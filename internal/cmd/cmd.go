@@ -265,10 +265,22 @@ func cmdSetup(args []string) int {
 		return 1
 	}
 	fmt.Printf("\n%d target(s) configured. Restart them to pick up the \"korva\" MCP server.\n", configured)
+	printAutostartTip()
 	if failures > 0 {
 		return 1
 	}
 	return 0
+}
+
+// printAutostartTip nudges the user toward the one-time per-editor setting
+// that keeps the MCP server running across restarts. Editors start MCP
+// servers lazily, so without this the "korva" server shows Stopped on every
+// reopen until the assistant first needs a tool.
+func printAutostartTip() {
+	fmt.Println("\nKeep it running across restarts (one-time, per editor):")
+	fmt.Println("  • VS Code: set \"chat.mcp.autostart\": \"always\" in settings.json")
+	fmt.Println("  • Cursor / Windsurf: enable the \"korva\" server so it persists")
+	fmt.Println("  Details: https://platform.korva.dev/docs/editor-setup")
 }
 
 // promptForMissingTargets asks the user, one editor at a time, whether
