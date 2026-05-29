@@ -14,6 +14,11 @@ func TestRulesBlockHasProactiveCues(t *testing.T) {
 			t.Errorf("rules block missing %q", want)
 		}
 	}
+	// The "save to memory" → vault-in-parallel guidance must be present so
+	// agents don't only write editor-local memory for team decisions.
+	if !strings.Contains(b, "save to memory") || !strings.Contains(b, "in parallel") {
+		t.Errorf("rules block missing the save-to-memory/parallel guidance")
+	}
 	if !strings.Contains(b, rulesStartMarker) || !strings.Contains(b, rulesEndMarker) {
 		t.Error("rules block missing managed markers")
 	}
