@@ -191,6 +191,84 @@ func (c *Client) RejectSkill(ctx context.Context, name string) (Skill, error) {
 	return out, err
 }
 
+// --- Packages ---------------------------------------------------------------
+//
+// Packages are bundles of slash-commands distributed via hash install
+// codes. See docs/specs/team-packages.md in korva-platform.
+
+// PackageCommand is one slash-command inside a Package. Body is the
+// canonical markdown; the CLI transpiler renders editor-specific
+// frontmatter on install (Copilot prompt files + Claude Code commands).
+type PackageCommand struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argument_hint"`
+	Body         string `json:"body"`
+	Position     int    `json:"position"`
+}
+
+// Package is one team-curated bundle. Commands is populated by
+// /v1/team/packages/{id} and /v1/packages/install/{code}; the listing
+// endpoint omits it to keep payloads small.
+type Package struct {
+	ID          string           `json:"id"`
+	TeamID      string           `json:"team_id"`
+	Name        string           `json:"name"`
+	DisplayName string           `json:"display_name"`
+	Description string           `json:"description"`
+	Version     int              `json:"version"`
+	Status      string           `json:"status"`
+	Commands    []PackageCommand `json:"commands,omitempty"`
+}
+
+// ListPackages returns every package belonging to the caller's team.
+func (c *Client) ListPackages(ctx context.Context) ([]Package, error) {
+	var out struct {
+		Packages []Package `json:"packages"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/team/packages", nil, true, &out); err != nil {
+		return nil, err
+	}
+	if out.Packages == nil {
+		return []Package{}, nil
+	}
+	return out.Packages, nil
+}
+
+// InstallPackage redeems a kvp_ install code on the unauthenticated
+// /v1/packages/install/{code} endpoint and returns the full package +
+// command payload. The payload is what the CLI writes to disk via
+// internal/editor's project writer.
+func (c *Client) InstallPackage(ctx context.Context, code, project, cliVersion string, editors []string, fileCount int) (Package, error) {
+	if editors == nil {
+		editors = []string{}
+	}
+	payload := map[string]any{
+		"project":     project,
+		"cli_version": cliVersion,
+		"editors":     editors,
+		"file_count":  fileCount,
+	}
+	var out Package
+	err := c.do(ctx, http.MethodPost, "/v1/packages/install/"+code, payload, false, &out)
+	return out, err
+}
+
+// RecordPackageRun is best-effort telemetry posted by `korva pkg run`.
+// The server records (team, actor, project, command_name, editor); the
+// caller passes empty strings for fields it doesn't know.
+func (c *Client) RecordPackageRun(ctx context.Context, packageID, commandID, project, commandName, editor string, succeeded bool) error {
+	payload := map[string]any{
+		"package_id":   packageID,
+		"command_id":   commandID,
+		"project":      project,
+		"command_name": commandName,
+		"editor":       editor,
+		"succeeded":    succeeded,
+	}
+	return c.do(ctx, http.MethodPost, "/v1/team/packages/runs", payload, true, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, reqBody any, auth bool, out any) error {
 	var body io.Reader
 	if reqBody != nil {
