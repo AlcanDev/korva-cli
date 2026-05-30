@@ -45,6 +45,8 @@ func Run(args []string) int {
 		return cmdStatus()
 	case "skill", "skills":
 		return cmdSkill(args[1:])
+	case "pkg", "package", "packages":
+		return cmdPkg(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
 		usage()
@@ -63,6 +65,7 @@ Usage:
   korva rules [--install]               Make the agent use Korva proactively
   korva status                          Show CLI status + detected targets
   korva skill <subcommand>              Manage team skills (list, show, add, rm)
+  korva pkg <subcommand>                Install team slash-command packages (list, install, uninstall, status)
   korva version                         Print the CLI version
 
 Editor targets:
@@ -374,6 +377,14 @@ func writeServerAtPath(path string, t editor.Target, serverURL, token string) er
 	// The Target type owns the schema/key + write logic; we just swap the
 	// path. The cleanest way is to clone the target via a manual write.
 	return editor.WriteServer(path, t, serverURL, token)
+}
+
+// currentConfig returns the saved CLI config, or the zero value on
+// load failure. Used by commands like `pkg install` that don't require
+// a login — the server URL still needs to come from somewhere.
+func currentConfig() config.Config {
+	cfg, _ := config.Load()
+	return cfg
 }
 
 func resolveServer(flagValue string, cfg config.Config) string {
