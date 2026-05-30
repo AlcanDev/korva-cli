@@ -33,6 +33,8 @@ func cmdPkg(args []string) int {
 		return cmdPkgUninstall(args[1:])
 	case "status":
 		return cmdPkgStatus(args[1:])
+	case "run":
+		return cmdPkgRun(args[1:])
 	case "help", "--help", "-h":
 		pkgUsage(os.Stdout)
 		return 0
@@ -51,6 +53,7 @@ Usage:
   korva pkg install <code> [--here]        Redeem an install code and write files
   korva pkg uninstall <name> [--yes]       Remove a package's files from this project
   korva pkg status                         Show packages installed in this project
+  korva pkg run <name> [-- args…]          Print a command's body (pipe into gh copilot suggest, etc.)
 
 Flags:
   --here                                   Don't look for a project root — use cwd as-is
@@ -272,6 +275,88 @@ func discoverCommands(root, _ string) []string {
 		out = append(out, c)
 	}
 	return out
+}
+
+// --- run --------------------------------------------------------------------
+
+// cmdPkgRun reads a locally-installed command file, prints its body to
+// stdout (with $ARGUMENTS substituted from the trailing CLI args), and
+// best-effort posts run telemetry. Intended for piping into
+// `gh copilot suggest`, which doesn't natively support prompt files:
+//
+//	korva pkg run dev "explain this bug" | gh copilot suggest
+//
+// Copilot path takes priority because of editor priority defined in
+// ADR 0019; falls back to the Claude file if Copilot isn't installed.
+func cmdPkgRun(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: korva pkg run <name> [-- args…]")
+		return 1
+	}
+	name := args[0]
+	// Anything after `--` (or just remaining args) is the user's input,
+	// which we substitute into $ARGUMENTS.
+	rest := args[1:]
+	if len(rest) > 0 && rest[0] == "--" {
+		rest = rest[1:]
+	}
+	userArgs := strings.Join(rest, " ")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not get cwd: %v\n", err)
+		return 1
+	}
+	root, err := editor.FindProjectRoot(cwd)
+	if err != nil {
+		root = cwd
+	}
+
+	// Prefer Copilot file (priority per ADR); fall back to Claude. We
+	// don't strip the frontmatter — the body the agent receives in
+	// either editor includes it, so stdout matches what a real
+	// invocation would see.
+	var body string
+	var sourceEditor string
+	for _, t := range editor.ProjectTargets() {
+		path := filepath.Join(root, t.SubPath, name+t.Extension)
+		raw, readErr := os.ReadFile(path)
+		if readErr == nil {
+			body = string(raw)
+			sourceEditor = t.Name
+			break
+		}
+	}
+	if body == "" {
+		fmt.Fprintf(os.Stderr, "no installed command named %q under %s\n", name, root)
+		fmt.Fprintln(os.Stderr, "run `korva pkg install <code>` first, or `korva pkg status` to inspect")
+		return 1
+	}
+
+	// Substitute $ARGUMENTS / ${input:arguments} with the user's
+	// trailing args so the printed body is ready to pipe.
+	body = strings.ReplaceAll(body, "$ARGUMENTS", userArgs)
+	body = strings.ReplaceAll(body, "${input:arguments}", userArgs)
+	fmt.Print(body)
+	if !strings.HasSuffix(body, "\n") {
+		fmt.Println()
+	}
+
+	// Best-effort telemetry: needs a login to authenticate. Skip
+	// silently when not logged in so `pkg run` is still useful in
+	// untrusted shells.
+	cfg := currentConfig()
+	if cfg.LoggedIn() {
+		project := filepath.Base(root)
+		client := api.New(cfg.ServerURL, cfg.Token)
+		_ = client.RecordPackageRun(
+			context.Background(),
+			"", // packageID unknown locally in v1
+			"", // commandID unknown locally in v1
+			project, name, sourceEditor, true,
+		)
+	}
+	return 0
 }
 
 // --- status -----------------------------------------------------------------
