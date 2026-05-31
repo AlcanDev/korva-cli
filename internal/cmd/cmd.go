@@ -47,6 +47,8 @@ func Run(args []string) int {
 		return cmdSkill(args[1:])
 	case "pkg", "package", "packages":
 		return cmdPkg(args[1:])
+	case "extension", "ext":
+		return cmdExtension(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
 		usage()
@@ -66,6 +68,7 @@ Usage:
   korva status                          Show CLI status + detected targets
   korva skill <subcommand>              Manage team skills (list, show, add, rm)
   korva pkg <subcommand>                Install team slash-command packages (list, install, uninstall, status)
+  korva extension <subcommand>          Install the sideloaded VS Code extension (install, uninstall, status)
   korva version                         Print the CLI version
 
 Editor targets:
