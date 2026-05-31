@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/AlcanDev/korva-cli/internal/api"
+	"github.com/AlcanDev/korva-cli/internal/claudehook"
 	"github.com/AlcanDev/korva-cli/internal/editor"
 	"github.com/AlcanDev/korva-cli/internal/version"
 )
@@ -35,6 +36,8 @@ func cmdPkg(args []string) int {
 		return cmdPkgStatus(args[1:])
 	case "run":
 		return cmdPkgRun(args[1:])
+	case "hook":
+		return cmdPkgHook(args[1:])
 	case "help", "--help", "-h":
 		pkgUsage(os.Stdout)
 		return 0
@@ -174,6 +177,14 @@ func cmdPkgInstall(args []string) int {
 		return 1
 	}
 
+	// Best-effort: drop the Claude Code telemetry hook. A failure
+	// here is a measurement gap, not a correctness bug, so we warn
+	// and continue rather than aborting the install.
+	if err := claudehook.EnsureHook(root); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not register Claude Code hook: %v\n", err)
+		fmt.Fprintln(os.Stderr, "  (the package files installed correctly; runtime telemetry for Claude Code will be missing)")
+	}
+
 	fmt.Printf("Installed %s v%d (%d commands) into %s\n",
 		pkg.Name, pkg.Version, len(pkg.Commands), root)
 	for _, r := range results {
@@ -275,6 +286,27 @@ func discoverCommands(root, _ string) []string {
 		out = append(out, c)
 	}
 	return out
+}
+
+// --- hook -------------------------------------------------------------------
+
+// cmdPkgHook is the entry point the Claude Code hook script execs.
+// Reads the hook payload from stdin, identifies a slash command, and
+// posts run telemetry. Always exits 0 — see internal/claudehook for
+// the silent-failure contract that protects the developer's chat.
+func cmdPkgHook(args []string) int {
+	fs := flag.NewFlagSet("pkg hook", flag.ContinueOnError)
+	event := fs.String("event", "", "hook event name (passed by Claude Code's hook contract)")
+	if err := fs.Parse(args); err != nil {
+		return 0
+	}
+	// Currently only one event is wired; a future hook for Stop /
+	// PostToolUse would dispatch differently.
+	if *event != "" && *event != "user-prompt-submit" {
+		return 0
+	}
+	_ = claudehook.Handle(os.Stdin)
+	return 0
 }
 
 // --- run --------------------------------------------------------------------
