@@ -36,10 +36,11 @@ func TestTranspileCopilot_Golden(t *testing.T) {
 		Body:         "Run $ARGUMENTS through the orchestrator.\n",
 	}
 	got := transpileCopilot(cmd)
-	// Copilot prompt files: only description + argument-hint. Filename
-	// is the command name, model + mode are picked by the user in
-	// the chat UI. See transpileCopilot's doc-comment.
-	want := "---\ndescription: EPSDTAVAO orchestrator\nargument-hint: <task>\n---\n\nRun ${input:arguments} through the orchestrator.\n"
+	// Copilot prompt files: description + argument-hint + agent: agent.
+	// Filename is the command name (no `name:`). `agent: agent` is the
+	// chat MODE; the model (Sonnet, GPT-4o, etc.) is picked at runtime
+	// in the chat UI. See transpileCopilot's doc-comment.
+	want := "---\ndescription: EPSDTAVAO orchestrator\nargument-hint: <task>\nagent: agent\n---\n\nRun ${input:arguments} through the orchestrator.\n"
 	if got != want {
 		t.Errorf("Copilot transpile mismatch.\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -100,8 +101,8 @@ func TestWritePackage_FullDisk(t *testing.T) {
 		path    string
 		mustSub string
 	}{
-		{".github/prompts/dev.prompt.md", "description: Orchestrator"},
-		{".github/prompts/explore.prompt.md", "description: Understand"},
+		{".github/prompts/dev.prompt.md", "agent: agent"},
+		{".github/prompts/explore.prompt.md", "agent: agent"},
 		{".claude/commands/dev.md", "Body 1"},
 		{".claude/commands/explore.md", "Body 2"},
 	}
