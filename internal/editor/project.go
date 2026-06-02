@@ -93,19 +93,32 @@ func transpileClaude(cmd api.PackageCommand) string {
 	return b.String()
 }
 
-// transpileCopilot builds the Copilot prompt-file format. We emit
-// only `description` and `argument-hint` — Copilot uses the filename
-// as the command name (no `name:` field), and the model + mode are
-// picked at runtime by the user in the chat UI (no `agent:` /
-// `model:` fields).
+// transpileCopilot builds the Copilot prompt-file format:
 //
-// Past versions hardcoded `agent: gpt-4`, but Copilot's `agent` field
-// is the chat MODE (`ask` / `edit` / `agent`) not the model — passing
-// `gpt-4` produced an "Unknown agent" error in the editor and broke
-// the prompt file. Devs who actually run Claude Sonnet in Copilot
-// would also have wanted that override gone. The lesson: trust the
-// user's editor settings, hardcode nothing the file format doesn't
-// require.
+//	---
+//	description: <…>
+//	argument-hint: <…>
+//	agent: agent
+//	---
+//
+// `agent` is Copilot's chat MODE (NOT the model). Valid values are
+// the built-in chat modes: `agent` | `ask` | `edit`. We default to
+// `agent` because the Korva-curated commands almost always need
+// tool access — reading files, calling skill_* MCP tools, editing
+// code multi-step. `ask` would limit them to plain Q&A.
+//
+// History: an earlier version hardcoded `agent: gpt-4` (mistakenly
+// treating `agent` as a model field), which produced "Unknown agent
+// 'gpt-4'. Available agents: agent, ask, edit" in VS Code. A
+// follow-up dropped the field entirely, but Copilot then fell back
+// to `ask` mode and commands that wanted tools couldn't get them.
+// The current default is the smallest correct frontmatter for our
+// case: emit `agent: agent`, let the user override the MODEL via
+// the chat UI dropdown (Sonnet, GPT-4o, etc.).
+//
+// We do not emit `name:` — Copilot uses the filename as the command
+// name. Adding `name:` would be redundant + a foot-gun (rename one
+// without the other and Copilot warns).
 func transpileCopilot(cmd api.PackageCommand) string {
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -115,6 +128,7 @@ func transpileCopilot(cmd api.PackageCommand) string {
 	if cmd.ArgumentHint != "" {
 		fmt.Fprintf(&b, "argument-hint: %s\n", yamlEscape(cmd.ArgumentHint))
 	}
+	b.WriteString("agent: agent\n")
 	b.WriteString("---\n\n")
 	body := stripFrontmatter(cmd.Body)
 	body = argumentsRE.ReplaceAllString(body, "${input:arguments}")
