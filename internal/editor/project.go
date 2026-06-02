@@ -93,19 +93,28 @@ func transpileClaude(cmd api.PackageCommand) string {
 	return b.String()
 }
 
-// transpileCopilot builds the Copilot prompt-file format: name +
-// description + argument-hint + agent, with `$ARGUMENTS` rewritten.
+// transpileCopilot builds the Copilot prompt-file format. We emit
+// only `description` and `argument-hint` — Copilot uses the filename
+// as the command name (no `name:` field), and the model + mode are
+// picked at runtime by the user in the chat UI (no `agent:` /
+// `model:` fields).
+//
+// Past versions hardcoded `agent: gpt-4`, but Copilot's `agent` field
+// is the chat MODE (`ask` / `edit` / `agent`) not the model — passing
+// `gpt-4` produced an "Unknown agent" error in the editor and broke
+// the prompt file. Devs who actually run Claude Sonnet in Copilot
+// would also have wanted that override gone. The lesson: trust the
+// user's editor settings, hardcode nothing the file format doesn't
+// require.
 func transpileCopilot(cmd api.PackageCommand) string {
 	var b strings.Builder
 	b.WriteString("---\n")
-	fmt.Fprintf(&b, "name: %s\n", yamlEscape(cmd.Name))
 	if cmd.Description != "" {
 		fmt.Fprintf(&b, "description: %s\n", yamlEscape(cmd.Description))
 	}
 	if cmd.ArgumentHint != "" {
 		fmt.Fprintf(&b, "argument-hint: %s\n", yamlEscape(cmd.ArgumentHint))
 	}
-	b.WriteString("agent: gpt-4\n")
 	b.WriteString("---\n\n")
 	body := stripFrontmatter(cmd.Body)
 	body = argumentsRE.ReplaceAllString(body, "${input:arguments}")
