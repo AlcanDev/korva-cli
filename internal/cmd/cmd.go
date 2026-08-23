@@ -47,6 +47,8 @@ func Run(args []string) int {
 		return cmdSkill(args[1:])
 	case "pkg", "package", "packages":
 		return cmdPkg(args[1:])
+	case "context", "ctx":
+		return cmdContext(args[1:])
 	case "extension", "ext":
 		return cmdExtension(args[1:])
 	default:
@@ -68,6 +70,7 @@ Usage:
   korva status                          Show CLI status + detected targets
   korva skill <subcommand>              Manage team skills (list, show, add, rm)
   korva pkg <subcommand>                Install team slash-command packages (list, install, uninstall, status)
+  korva context <subcommand>            Sync the living project context (push, pull)
   korva extension <subcommand>          Install the sideloaded VS Code extension (install, uninstall, status)
   korva version                         Print the CLI version
 

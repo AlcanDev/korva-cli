@@ -1,3 +1,3 @@
 module github.com/AlcanDev/korva-cli
 
-go 1.26.1
+go 1.26.6
