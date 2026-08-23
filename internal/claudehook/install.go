@@ -32,15 +32,23 @@ exec korva pkg hook --event=user-prompt-submit
 // failing the install because a missing hook is a measurement gap,
 // not a correctness bug.
 func EnsureHook(root string) error {
+	return EnsureEventHook(root, HookFileName, hookScript, []string{"UserPromptSubmit"})
+}
+
+// EnsureEventHook writes an arbitrary hook script under .claude/hooks/
+// and merges its registration into .claude/settings.json for every
+// event in events. Shared by the telemetry hook above and the session
+// context hooks (internal/sessionhook). Idempotent per (script, event).
+func EnsureEventHook(root, fileName, script string, events []string) error {
 	hooksDir := filepath.Join(root, ".claude", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", hooksDir, err)
 	}
-	hookPath := filepath.Join(hooksDir, HookFileName)
-	if err := os.WriteFile(hookPath, []byte(hookScript), 0o755); err != nil {
+	hookPath := filepath.Join(hooksDir, fileName)
+	if err := os.WriteFile(hookPath, []byte(script), 0o755); err != nil {
 		return fmt.Errorf("write %s: %w", hookPath, err)
 	}
-	return mergeSettings(root, hookPath)
+	return mergeSettings(root, hookPath, events)
 }
 
 // mergeSettings reads .claude/settings.json (if any), merges the
@@ -55,7 +63,7 @@ func EnsureHook(root string) error {
 //	    ]
 //	  }
 //	}
-func mergeSettings(root, hookPath string) error {
+func mergeSettings(root, hookPath string, events []string) error {
 	settingsPath := filepath.Join(root, ".claude", "settings.json")
 	rel, err := filepath.Rel(root, hookPath)
 	if err != nil {
@@ -83,36 +91,46 @@ func mergeSettings(root, hookPath string) error {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	ups, _ := hooks["UserPromptSubmit"].([]any)
-	// Find an existing Korva entry (its inner command points at our
-	// script). If present, leave it alone — no need to rewrite.
-	for _, entry := range ups {
-		e, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		inner, _ := e["hooks"].([]any)
-		for _, h := range inner {
-			hm, ok := h.(map[string]any)
+	changed := false
+	for _, event := range events {
+		entries, _ := hooks[event].([]any)
+		// Find an existing Korva entry (its inner command points at
+		// our script). If present, leave this event alone.
+		wired := false
+		for _, entry := range entries {
+			e, ok := entry.(map[string]any)
 			if !ok {
 				continue
 			}
-			if cmd, _ := hm["command"].(string); cmd == cmdLine {
-				return nil // already wired
+			inner, _ := e["hooks"].([]any)
+			for _, h := range inner {
+				hm, ok := h.(map[string]any)
+				if !ok {
+					continue
+				}
+				if cmd, _ := hm["command"].(string); cmd == cmdLine {
+					wired = true
+				}
 			}
 		}
-	}
-
-	ups = append(ups, map[string]any{
-		"matcher": "",
-		"hooks": []any{
-			map[string]any{
-				"type":    "command",
-				"command": cmdLine,
+		if wired {
+			continue
+		}
+		entries = append(entries, map[string]any{
+			"matcher": "",
+			"hooks": []any{
+				map[string]any{
+					"type":    "command",
+					"command": cmdLine,
+				},
 			},
-		},
-	})
-	hooks["UserPromptSubmit"] = ups
+		})
+		hooks[event] = entries
+		changed = true
+	}
+	if !changed {
+		return nil // everything already wired
+	}
 	doc["hooks"] = hooks
 
 	out, err := json.MarshalIndent(doc, "", "  ")

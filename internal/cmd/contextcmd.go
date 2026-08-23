@@ -15,6 +15,7 @@ import (
 	"github.com/AlcanDev/korva-cli/internal/contextfiles"
 	"github.com/AlcanDev/korva-cli/internal/editor"
 	"github.com/AlcanDev/korva-cli/internal/gitinfo"
+	"github.com/AlcanDev/korva-cli/internal/sessionhook"
 )
 
 // pushTokenEnv is where CI provides the project-scoped push token.
@@ -32,6 +33,8 @@ func cmdContext(args []string) int {
 		return cmdContextPush(args[1:])
 	case "pull":
 		return cmdContextPull(args[1:])
+	case "hook":
+		return cmdContextHook(args[1:])
 	case "help", "--help", "-h":
 		contextUsage(os.Stdout)
 		return 0
@@ -40,6 +43,34 @@ func cmdContext(args []string) int {
 		contextUsage(os.Stderr)
 		return 1
 	}
+}
+
+// cmdContextHook is the Claude Code hook entry point (SessionStart +
+// Stop dispatch on the payload) plus its installer. The hook path is
+// silent-failure by contract: it must NEVER break a chat session, so
+// it always exits 0.
+func cmdContextHook(args []string) int {
+	if len(args) > 0 && args[0] == "install" {
+		fs := flag.NewFlagSet("context hook install", flag.ContinueOnError)
+		here := fs.Bool("here", false, "use cwd as the project root")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 1
+		}
+		root, ok := resolveRoot(*here)
+		if !ok {
+			return 1
+		}
+		if err := sessionhook.EnsureHooks(root); err != nil {
+			fmt.Fprintf(os.Stderr, "install session hooks: %v\n", err)
+			return 1
+		}
+		fmt.Println("wired .claude/hooks/" + sessionhook.HookFileName + " (SessionStart + Stop)")
+		fmt.Println("every new Claude Code session in this project now loads team context automatically,")
+		fmt.Println("and sessions with real work are asked to save a vault summary before finishing.")
+		return 0
+	}
+	_ = sessionhook.Handle(os.Stdin, os.Stdout)
+	return 0
 }
 
 func contextUsage(w io.Writer) {
@@ -58,6 +89,14 @@ Usage:
       plain markdown any AI agent reads for portfolio awareness.
       Requires korva login. Adds .korva/ to .gitignore unless told not
       to.
+
+  korva context hook install [--here]
+      Make Korva automatic in Claude Code for this project: every new
+      session injects the cached team context (refreshed at most every
+      30 min — override with KORVA_CONTEXT_TTL), and sessions that did
+      real work are asked once to save a vault summary before
+      finishing. korva context hook (no args) is the entry point the
+      installed hook execs; you never run it by hand.
 
 Flags:
   --project N        Override the project name (default: project root folder name)
