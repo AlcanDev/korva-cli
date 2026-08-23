@@ -105,6 +105,8 @@ korva setup --target vscode --path /path/to/Code/User/mcp.json
 | `korva skill propose <name> ...`     | Propose a skill for review.                                  |
 | `korva skill approve <name>`         | Approve a pending skill (Team Lead).                         |
 | `korva skill reject <name>`          | Reject a pending skill (Team Lead).                          |
+| `korva context push`                 | Report this repo's main state to Korva (CI, on merges; auth via `KORVA_CONTEXT_TOKEN`). |
+| `korva context pull`                 | Write `.korva/context/*.md` — portfolio, brief and recent decisions for any AI agent. |
 | `korva version`                      | Print the CLI version.                                       |
 
 ### Environment variables
@@ -112,6 +114,7 @@ korva setup --target vscode --path /path/to/Code/User/mcp.json
 | Variable          | Effect                                                                  |
 |-------------------|-------------------------------------------------------------------------|
 | `KORVA_SERVER`    | Backbone URL used by every command (overrides config, beaten by flags). |
+| `KORVA_CONTEXT_TOKEN` | Project-scoped `kctx_…` push token used by `korva context push` (mint it in the console). |
 | `KORVA_HOME`      | Directory holding `config.json` (default: `~/.korva`, `%APPDATA%\korva` on Windows). |
 | `KORVA_DIST`      | Where `install.sh` / `install.ps1` look for binaries.                   |
 | `KORVA_PREFIX`    | Where the install scripts copy `korva` to.                              |
