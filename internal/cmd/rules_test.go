@@ -9,7 +9,7 @@ import (
 
 func TestRulesBlockHasProactiveCues(t *testing.T) {
 	b := rulesBlock()
-	for _, want := range []string{"vault_context", "team_pipeline_state", "vault_search", "vault_save", "skill_*"} {
+	for _, want := range []string{"vault_context", "vault_search", "vault_save", "vault_get", "team_portfolio", "topic_key", ".korva/context/project-brief.md", "skill_*"} {
 		if !strings.Contains(b, want) {
 			t.Errorf("rules block missing %q", want)
 		}
@@ -74,5 +74,57 @@ func TestUpsertManagedBlockAppendsToFileWithoutMarkers(t *testing.T) {
 	s := string(got)
 	if !strings.Contains(s, "keep me") || !strings.Contains(s, rulesStartMarker) {
 		t.Errorf("append did not preserve content + add block:\n%s", s)
+	}
+}
+
+// TestRulesBlockHasNoStaleTools — the block must never re-install
+// references to tools removed from the platform (ADR-0022 dropped
+// team_pipeline_state; the block kept advertising it until this test).
+func TestRulesBlockHasNoStaleTools(t *testing.T) {
+	if strings.Contains(rulesBlock(), "team_pipeline_state") {
+		t.Error("rules block references the removed team_pipeline_state tool")
+	}
+}
+
+// TestInstallProjectRules — --install --project writes the managed
+// block into every per-repo instruction file, idempotently.
+func TestInstallProjectRules(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := cmdRules([]string{"--install", "--project", "--here"}); code != 0 {
+		t.Fatalf("install --project = %d, want 0", code)
+	}
+	for _, rel := range []string{
+		".github/copilot-instructions.md",
+		".cursor/rules/korva.mdc",
+		".windsurfrules",
+		"AGENTS.md",
+	} {
+		raw, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			t.Errorf("missing %s: %v", rel, err)
+			continue
+		}
+		if !strings.Contains(string(raw), ".korva/context/project-brief.md") {
+			t.Errorf("%s lacks the session-start directive", rel)
+		}
+	}
+
+	// Idempotent: a second run reports success and changes nothing.
+	before, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if code := cmdRules([]string{"--install", "--project", "--here"}); code != 0 {
+		t.Fatalf("second install = %d, want 0", code)
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if string(before) != string(after) {
+		t.Error("second install changed AGENTS.md")
 	}
 }

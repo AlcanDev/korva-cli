@@ -23,11 +23,13 @@ func rulesBlock() string {
 	return rulesStartMarker + `
 # Korva — team memory & standards (use proactively)
 
+Session start — ALWAYS, in every AI chat:
+- If ` + "`.korva/context/project-brief.md`" + ` exists in the workspace, read it and ` + "`.korva/context/decisions.md`" + ` before planning anything — that IS the team's cached context (refresh with ` + "`korva context pull`" + ` when older than ~30 min). Otherwise call ` + "`vault_context`" + ` once to load recent team knowledge.
+
 Use the Korva MCP without being asked:
-- At the start of a non-trivial task (or when entering plan/agent mode), call ` + "`vault_context`" + ` to load recent team knowledge before planning.
-- Before risky writes (DB migrations, infra, deploys, deleting data), call ` + "`team_pipeline_state`" + ` and warn if the team is in freeze/incident.
-- Before solving a problem or making a design choice, call ` + "`vault_search`" + ` for prior decisions and fixes.
-- After a non-trivial decision, fix, or gotcha, call ` + "`vault_save`" + ` (what, why, alternatives). Never save secrets or raw source. This includes requests to "save to memory" / remember something for the team: record it in the Korva vault in parallel with any editor-local memory (local memory is per-machine; the Korva vault is shared with the team).
+- Before solving a problem or making a design choice, call ` + "`vault_search`" + ` for prior decisions and fixes. Results are compact — drill into a hit with ` + "`vault_get <id>`" + `.
+- After a non-trivial decision, fix, or gotcha, call ` + "`vault_save`" + ` (what, why, alternatives; add a stable ` + "`topic_key`" + ` like ` + "`architecture/auth-model`" + ` for topics that evolve). Never save secrets or raw source. This includes requests to "save to memory" / remember something for the team: record it in the Korva vault in parallel with any editor-local memory (local memory is per-machine; the Korva vault is shared with the team).
+- When work references the team's other repos, call ` + "`team_portfolio`" + ` once for the portfolio map.
 - Prefer team ` + "`skill_*`" + ` tools over improvising prompts.
 ` + rulesEndMarker
 }
@@ -89,6 +91,48 @@ func upsertManagedBlock(path, block string) (string, error) {
 	return "appended", nil
 }
 
+// projectRulesTargets are the per-repo instruction files editors load
+// on EVERY request — the deterministic layer for editors without a hook
+// system (VS Code Copilot first among them, per the user priority in
+// ADR-0019/0026).
+func projectRulesTargets() []fileTarget {
+	return []fileTarget{
+		{name: "copilot", rel: []string{".github", "copilot-instructions.md"}},
+		{name: "cursor", rel: []string{".cursor", "rules", "korva.mdc"}},
+		{name: "windsurf", rel: []string{".windsurfrules"}},
+		{name: "agents-md", rel: []string{"AGENTS.md"}},
+	}
+}
+
+// installProjectRules upserts the managed block into the current repo's
+// always-loaded instruction files, making Korva usage deterministic for
+// every AI chat that reads them (Copilot loads .github/copilot-
+// instructions.md on every request).
+func installProjectRules(here bool) int {
+	root, ok := resolveRoot(here)
+	if !ok {
+		return 1
+	}
+	block := rulesBlock()
+	failures := 0
+	for _, t := range projectRulesTargets() {
+		path := filepath.Join(append([]string{root}, t.rel...)...)
+		action, err := upsertManagedBlock(path, block)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %-12s %v\n", t.name, err)
+			failures++
+			continue
+		}
+		fmt.Printf("✓ %-12s %s (%s)\n", t.name, path, action)
+	}
+	fmt.Println("\nEvery AI chat that reads these files now loads the Korva rules on each request.")
+	fmt.Println("For Claude Code, `korva context hook install` adds the fully automatic session hooks on top.")
+	if failures > 0 {
+		return 1
+	}
+	return 0
+}
+
 // cmdRules prints the proactive-usage rule block (and where each editor keeps
 // its global rules), or installs it into the file-based editors with
 // --install. Editors whose global rules aren't a writable file (VS Code,
@@ -96,8 +140,14 @@ func upsertManagedBlock(path, block string) (string, error) {
 func cmdRules(args []string) int {
 	fs := flag.NewFlagSet("rules", flag.ContinueOnError)
 	install := fs.Bool("install", false, "write the rule block into file-based editors' global rules")
+	project := fs.Bool("project", false, "with --install: write the block into THIS repo's always-loaded instruction files (Copilot, Cursor, Windsurf, AGENTS.md) instead of the global ones")
+	here := fs.Bool("here", false, "with --project: use cwd as the project root without walking up")
 	if err := fs.Parse(args); err != nil {
 		return 1
+	}
+
+	if *install && *project {
+		return installProjectRules(*here)
 	}
 
 	if !*install {
@@ -110,7 +160,9 @@ func cmdRules(args []string) int {
 		fmt.Println("  • Claude Code: ~/.claude/CLAUDE.md")
 		fmt.Println("  • Cursor:      Settings → Rules for AI")
 		fmt.Println("  • Windsurf:    ~/.codeium/windsurf/memories/global_rules.md")
-		fmt.Println("\nRun `korva rules --install` to write it for Claude Code and Windsurf automatically.")
+		fmt.Println("\nRun `korva rules --install` to write it for Claude Code and Windsurf automatically,")
+		fmt.Println("or `korva rules --install --project` to write it into THIS repo's instruction files")
+		fmt.Println("(.github/copilot-instructions.md, .cursor/rules/, .windsurfrules, AGENTS.md).")
 		fmt.Println("Docs: https://platform.korva.dev/docs/editor-setup")
 		return 0
 	}

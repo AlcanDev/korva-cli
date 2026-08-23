@@ -108,6 +108,7 @@ korva setup --target vscode --path /path/to/Code/User/mcp.json
 | `korva context push`                 | Report this repo's main state to Korva (CI, on merges; auth via `KORVA_CONTEXT_TOKEN`). |
 | `korva context pull`                 | Write `.korva/context/*.md` — portfolio, brief and recent decisions for any AI agent. |
 | `korva context hook install`         | Make Korva automatic in Claude Code: inject cached team context on every SessionStart, nudge one `vault_save` on Stop when the session did real work. |
+| `korva rules --install --project`    | Write the Korva rules into THIS repo's always-loaded instruction files (`.github/copilot-instructions.md`, `.cursor/rules/`, `.windsurfrules`, `AGENTS.md`) — deterministic for Copilot and every editor without hooks. |
 | `korva version`                      | Print the CLI version.                                       |
 
 ### Environment variables
