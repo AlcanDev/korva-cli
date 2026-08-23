@@ -24,6 +24,25 @@ func TestRulesBlockHasProactiveCues(t *testing.T) {
 	}
 }
 
+// TestRulesBlockStaleBriefIsAskFirst — the stale-brief guidance (F2-lite,
+// platform ADR-0027) must ask before writing anywhere, ask at most once
+// per session, and never claim Korva writes to GitHub on the agent's
+// behalf: no LLM worker, no auto-PR, human confirms every write.
+func TestRulesBlockStaleBriefIsAskFirst(t *testing.T) {
+	b := rulesBlock()
+	for _, want := range []string{
+		"Stale brief",
+		"ASK, don't auto-write",
+		"ONCE per session",
+		"decisions.md",
+		"Never call that endpoint or edit README.md yourself without an explicit yes",
+	} {
+		if !strings.Contains(b, want) {
+			t.Errorf("rules block missing stale-brief guidance %q", want)
+		}
+	}
+}
+
 func TestUpsertManagedBlockCreatesUpdatesAndPreserves(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "CLAUDE.md")

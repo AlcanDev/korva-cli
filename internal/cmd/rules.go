@@ -31,6 +31,12 @@ Use the Korva MCP without being asked:
 - After a non-trivial decision, fix, or gotcha, call ` + "`vault_save`" + ` (what, why, alternatives; add a stable ` + "`topic_key`" + ` like ` + "`architecture/auth-model`" + ` for topics that evolve). Never save secrets or raw source. This includes requests to "save to memory" / remember something for the team: record it in the Korva vault in parallel with any editor-local memory (local memory is per-machine; the Korva vault is shared with the team).
 - When work references the team's other repos, call ` + "`team_portfolio`" + ` once for the portfolio map.
 - Prefer team ` + "`skill_*`" + ` tools over improvising prompts.
+
+Stale brief (⚠ marker in the loaded context, or ` + "`team_portfolio`" + `) — ASK, don't auto-write:
+- Ask the user ONCE per session: "this project's brief looks out of date — want me to help refresh it?" If they decline, drop it for the rest of the session.
+- If yes: read the current brief, ` + "`.korva/context/decisions.md`" + `, and the real repo (README, structure, recent commits) — don't guess from the stale brief alone.
+- Draft a short update: what the project is, its stack, how the team works on it. State facts you can verify from the repo; skip what you can't.
+- Show the draft and let the user choose where it lands: saved as the brief (a Lead/Admin can via the console or ` + "`PUT /v1/team/projects/{name}/context/brief`" + `), folded into README.md as a normal file edit, or both. Never call that endpoint or edit README.md yourself without an explicit yes.
 ` + rulesEndMarker
 }
 
